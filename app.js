@@ -63,6 +63,280 @@ function insertProductPromotion(htmlContent) {
   return document.documentElement.innerHTML;
 }
 
+// ============= INTERNAL LINKS =============
+/**
+ * Fetch existing blog articles from Shopify for internal linking
+ */
+async function getAvailableInternalLinks(maxLinks = 20) {
+  const apiVersion = '2023-10';
+  const articlesUrl = `${SHOP_URL}/admin/api/${apiVersion}/blogs/${BLOG_ID}/articles.json?limit=${maxLinks}&published_status=published`;
+  
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Shopify-Access-Token': ACCESS_TOKEN,
+  };
+
+  try {
+    const response = await fetch(articlesUrl, { headers });
+    const data = await response.json();
+    
+    if (!data.articles || data.articles.length === 0) {
+      console.log('No existing articles found for internal linking');
+      return [];
+    }
+    
+    // Get the shop domain for building URLs
+    const shopDomain = process.env.SHOP_DOMAIN || SHOP_URL.replace('https://', '').replace('.myshopify.com', '.com');
+    const blogHandle = process.env.BLOG_HANDLE || 'news';
+    
+    const internalLinks = data.articles.map(article => ({
+      url: `https://${shopDomain}/blogs/${blogHandle}/${article.handle}`,
+      title: article.title
+    }));
+    
+    // Shuffle and limit
+    const shuffled = internalLinks.sort(() => Math.random() - 0.5);
+    console.log(`Found ${shuffled.length} internal links available`);
+    
+    return shuffled.slice(0, maxLinks);
+  } catch (error) {
+    console.error('Error fetching internal links:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Format internal links for AI prompt
+ */
+function formatInternalLinksForAI(internalLinks) {
+  if (!internalLinks || internalLinks.length === 0) {
+    return '';
+  }
+  
+  let formatted = "INTERNAL LINKS TO USE (choose 3 that fit naturally with your content):\n";
+  internalLinks.forEach((link, index) => {
+    formatted += `${index + 1}. "${link.title}" - ${link.url}\n`;
+  });
+  
+  return formatted;
+}
+
+// ============= EXTERNAL LINKS =============
+/**
+ * Find external links using OpenAI with web search
+ */
+async function findExternalLinksWithAI(focusKeyword) {
+  console.log('Searching for external links related to:', focusKeyword);
+  
+  const prompt = `Search the web for authoritative, high-quality articles related to: "${focusKeyword}"
+
+Find 3 real, existing web pages from reputable sources (NOT Wikipedia) such as:
+- Major running/fitness publications (Runner's World, Running Magazine, etc.)
+- Sports news sites (ESPN, Sports Illustrated, etc.)
+- Health/fitness sites (Healthline, WebMD, etc.)
+- Technology review sites (for running tech topics)
+- Official brand/manufacturer websites
+
+For each link, provide:
+1. The exact, full URL (must be a real, working link)
+2. A short anchor text (2-5 words) that describes what the link is about
+
+IMPORTANT: Return ONLY valid JSON in this exact format, nothing else:
+[
+  {"url": "https://example.com/article", "text": "Anchor text here"},
+  {"url": "https://example.com/article2", "text": "Another anchor"}
+]
+
+Return ONLY the JSON array, no explanation or other text.`;
+
+  try {
+    // Try with web search using responses API
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-5.1',
+        tools: [{ type: 'web_search' }],
+        input: prompt
+      })
+    });
+
+    if (!response.ok) {
+      console.log('Web search API failed, using fallback');
+      return await findExternalLinksFallback(focusKeyword);
+    }
+
+    const data = await response.json();
+    
+    // Extract text from response
+    let responseText = '';
+    if (data.output) {
+      for (const item of data.output) {
+        if (item.content) {
+          for (const content of item.content) {
+            if (content.text) {
+              responseText += content.text;
+            }
+          }
+        }
+      }
+    } else if (data.choices?.[0]?.message?.content) {
+      responseText = data.choices[0].message.content;
+    }
+
+    const links = parseExternalLinksJson(responseText);
+    
+    if (links.length === 0) {
+      console.log('Could not parse links from web search, using fallback');
+      return await findExternalLinksFallback(focusKeyword);
+    }
+    
+    return links;
+  } catch (error) {
+    console.error('Error finding external links:', error.message);
+    return await findExternalLinksFallback(focusKeyword);
+  }
+}
+
+/**
+ * Fallback: Find external links without web search
+ */
+async function findExternalLinksFallback(focusKeyword) {
+  console.log('Using fallback for external links');
+  
+  const prompt = `You are an expert on running, fitness, and sports.
+
+For the topic "${focusKeyword}", suggest 3 authoritative external websites that would have relevant content. 
+
+Choose from well-known sources like:
+- runnersworld.com
+- active.com  
+- verywellfit.com
+- outsideonline.com
+- trainingpeaks.com
+- strava.com/blog
+- podiumrunner.com
+
+Return ONLY valid JSON in this exact format:
+[
+  {"url": "https://www.runnersworld.com/", "text": "Runner's World"},
+  {"url": "https://www.active.com/running", "text": "Active Running"}
+]
+
+Return ONLY the JSON array.`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'gpt-5.1',
+    });
+
+    const responseText = completion.choices[0].message.content || '';
+    return parseExternalLinksJson(responseText);
+  } catch (error) {
+    console.error('Fallback external links also failed:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Parse JSON array of links from AI response
+ */
+function parseExternalLinksJson(responseText) {
+  const links = [];
+  
+  // Try to extract JSON array from response
+  const match = responseText.match(/\[[\s\S]*\]/);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[0]);
+      
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (item.url && item.text) {
+            const url = item.url.trim();
+            // Validate URL
+            if (url.startsWith('http://') || url.startsWith('https://')) {
+              links.push({
+                url: url,
+                text: item.text.trim()
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing external links JSON:', e.message);
+    }
+  }
+  
+  console.log(`Parsed ${links.length} valid external links`);
+  return links;
+}
+
+/**
+ * Add external links to article content
+ */
+function addExternalLinks(htmlContent, externalLinks) {
+  if (!externalLinks || externalLinks.length === 0) {
+    return htmlContent;
+  }
+
+  const { window } = new JSDOM(htmlContent);
+  const { document } = window;
+  
+  const paragraphs = document.querySelectorAll('p');
+  const paragraphCount = paragraphs.length;
+  
+  if (paragraphCount < 3) {
+    console.log('Not enough paragraphs for external links');
+    return htmlContent;
+  }
+  
+  let linksAdded = 0;
+  const maxLinks = Math.min(2, externalLinks.length);
+  
+  // Add external links to middle paragraphs (at 40% and 70% positions)
+  const linkPositions = [
+    Math.floor(paragraphCount * 0.4),
+    Math.floor(paragraphCount * 0.7)
+  ];
+  
+  for (let i = 0; i < linkPositions.length && linksAdded < maxLinks; i++) {
+    const pos = linkPositions[i];
+    if (pos < paragraphCount && externalLinks[linksAdded]) {
+      const paragraph = paragraphs[pos];
+      if (paragraph) {
+        const linkData = externalLinks[linksAdded];
+        
+        // Create external link with proper attributes
+        const link = document.createElement('a');
+        link.href = linkData.url;
+        link.textContent = linkData.text;
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener noreferrer');
+        
+        // Append to paragraph
+        paragraph.appendChild(document.createTextNode(' ('));
+        paragraph.appendChild(link);
+        paragraph.appendChild(document.createTextNode(')'));
+        
+        linksAdded++;
+        console.log('Added external link:', linkData.url);
+      }
+    }
+  }
+  
+  if (linksAdded > 0) {
+    console.log(`Successfully added ${linksAdded} external links`);
+  }
+  
+  return document.documentElement.innerHTML;
+}
+
 (async () => {
   const postContent = 'Testing Twitter API with an image upload via twitter-api-v2.';
   const imageUrl = 'https://letsenhance.io/static/8f5e523ee6b2479e26ecc91b9c25261e/1015f/MainAfter.jpg'; // Replace with a valid image URL
@@ -72,12 +346,28 @@ function insertProductPromotion(htmlContent) {
 // Function to rewrite the article content using OpenAI
 async function rewriteArticleContent(articleTitle) {
   try {
+    // Get available internal links from existing Shopify blog articles
+    const internalLinks = await getAvailableInternalLinks(20);
+    const internalLinksText = formatInternalLinksForAI(internalLinks);
+    
+    // Build the prompt with internal links requirement
+    let prompt = `write a Running blog article with detailed informations about the topic: \n${articleTitle}\n\n Make it long and more detailed and informative, in HTML format:\n1. without header and footer\n2. the first thing must be an introduction within a paragraph\n3. the second thing is the article outline, with the functionality to jump to sections\n 4. section titles must be within an h2\n5. use lists (ul - ol) to make things clear and organized\n6. highlight improtant things using bold style\n7. optimized for SEO (use relevant tags for the best SEO ranking)\n8. adjust it to be readable and coherent, and make it long with a focus on improving its search engine visibility by strategically integrating relevant keywords. Make sure the revised content maintains a conversational tone and enhances readability by simplifying complex sentences. Additionally, ensure that the information remains accurate and comprehensive while presenting it in a more engaging and coherent manner.\n
+              When optimizing for SEO, include relevant keywords in the article while ensuring their natural incorporation. Improve the readability by breaking down long paragraphs, using bullet points where necessary, and ensuring a smooth flow of ideas.`;
+    
+    // Add internal links requirement if available
+    if (internalLinksText) {
+      prompt += `\n\nINTERNAL LINKING REQUIREMENT:\nYou MUST include exactly 3 internal links from the list below. Insert them naturally within relevant paragraphs as HTML anchor tags.\nFormat: <a href="URL">anchor text</a>\nChoose links that relate to the content and flow naturally in context.\n\n${internalLinksText}`;
+    }
+    
+    prompt += '\n\n###';
+    
+    console.log(`Generating article with ${internalLinks.length} internal links available`);
+    
     const completion = await openai.chat.completions.create({
       messages: [
         {
           role: 'user',
-          content: `write a Running blog article with detailed informations about the topic: \n${articleTitle}\n\n Make it long and more detailed and informative, in HTML format:\n1. without header and footer\n2. the first thing must be an introduction within a paragraph\n3. the second thing is the article outline, with the functionality to jump to sections\n 4. section titles must be within an h2\n5. use lists (ul - ol) to make things clear and organized\n6. highlight improtant things using bold style\n7. optimized for SEO (use relevant tags for the best SEO ranking)\n8. adjust it to be readable and coherent, and make it long with a focus on improving its search engine visibility by strategically integrating relevant keywords. Make sure the revised content maintains a conversational tone and enhances readability by simplifying complex sentences. Additionally, ensure that the information remains accurate and comprehensive while presenting it in a more engaging and coherent manner.\n
-              When optimizing for SEO, include relevant keywords in the article while ensuring their natural incorporation. Improve the readability by breaking down long paragraphs, using bullet points where necessary, and ensuring a smooth flow of ideas.\n\n###`,
+          content: prompt,
         },
       ],
       model: 'gpt-5.1',
@@ -109,6 +399,11 @@ async function rewriteArticleContent(articleTitle) {
 
     // Insert product promotion banners
     htmlContent = insertProductPromotion(htmlContent);
+    
+    // Add external links using AI web search
+    console.log('Adding external links...');
+    const externalLinks = await findExternalLinksWithAI(articleTitle);
+    htmlContent = addExternalLinks(htmlContent, externalLinks);
 
     return htmlContent;
   } catch (error) {
