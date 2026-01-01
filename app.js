@@ -80,23 +80,31 @@ async function rewriteArticleContent(articleTitle) {
               When optimizing for SEO, include relevant keywords in the article while ensuring their natural incorporation. Improve the readability by breaking down long paragraphs, using bullet points where necessary, and ensuring a smooth flow of ideas.\n\n###`,
         },
       ],
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
     });
 
     let rewrittenContent = completion.choices[0].message.content;
     console.log(rewrittenContent);
 
-    rewrittenContent = rewrittenContent.replace("```html", "");
+    // **bold** -> <b>
+    rewrittenContent = rewrittenContent.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>");
+    // strip code fences
+    rewrittenContent = rewrittenContent.replace(/```html|```/g, "");
+    // remove {...}
+    rewrittenContent = rewrittenContent.replace(/\{[^}]*\}/g, "");
 
-    // Remove <h1> tags from the HTML content using jsdom
+    // Remove <h1> tags and CSS from the HTML content using jsdom
     const { window } = new JSDOM(rewrittenContent);
     const { document } = window;
-    const h1Elements = document.querySelectorAll('h1');
-    h1Elements.forEach((h1Element) => {
-      h1Element.remove();
-    });
 
-    // Get the modified HTML content after removing <h1> tags
+    // Remove H1
+    document.querySelectorAll("h1").forEach((el) => el.remove());
+    // Remove CSS
+    document.querySelectorAll("style").forEach((el) => el.remove());
+    document.querySelectorAll("*").forEach((el) => el.removeAttribute("style"));
+    document.querySelectorAll('link[rel="stylesheet"]').forEach((el) => el.remove());
+
+    // Get the modified HTML content after removing <h1> tags and CSS
     let htmlContent = document.documentElement.innerHTML;
 
     // Insert product promotion banners
@@ -124,7 +132,7 @@ async function generateMetaDescription(articleTitle) {
           content: `Generate a well-optimized meta description for a Running article about this topic: \n${articleTitle}\n\n. Include relevant keywords and make it SEO-friendly to improve search engine visibility.###`,
         },
       ],
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
     });
 
     let metaDescription = completion.choices[0].message.content.trim();
@@ -146,7 +154,7 @@ async function generateImageDescription(articleTitle) {
           content: `Write me a detailed prompt for an AI text to image model for generating a blog article feature image about the topic: \n${articleTitle}\n\n. You must imagine how the image should loop like for this title and describe it in details for this AI, he will just design what you described. Reply and return only the detailed prompt without any other irrelevant text, because your reply will be sent directly to the AI text to image model. The prompt should start with 'Design an eye catching...' and give him a short title to place within the image that will accomplish the article title and explain the title style`,
         },
       ],
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
     });
 
     let metaDescription = completion.choices[0].message.content.trim();
@@ -168,7 +176,7 @@ async function generateArticleTitle() {
           content: `Generate a long, SEO-friendly Running blog article title within one of these categories: Running. The title must include relevant SEO keywords. Return only the title without any other text and without quotation marks.`,
         },
       ],
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
     });
 
     let articleTitle = completion.choices[0].message.content.trim();
@@ -192,7 +200,7 @@ async function generateSEOKeywords(articleTitle) {
           content: `Generate a list of 5 relevant SEO keywords for a Running blog article titled: "${articleTitle}". Return the 5 keywords as a comma-separated string without any additional text.`,
         },
       ],
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
     });
 
     let seoKeywords = completion.choices[0].message.content.trim();
@@ -216,7 +224,7 @@ async function generateArticleSummary(articleTitle, articleContent) {
           content: `Summarize the following article in a few sentences:\nTitle: ${articleTitle}\nContent: ${articleContent}\n\n###`,
         },
       ],
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
     });
 
     let summary = completion.choices[0].message.content.trim();
@@ -256,7 +264,7 @@ async function generateSocialMediaPost(platform, articleTitle, articleSummary, a
           content: prompt,
         },
       ],
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
     });
 
     let postContent = completion.choices[0].message.content.trim();
