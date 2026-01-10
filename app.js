@@ -29,6 +29,438 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 // Initialize OpenAI with your API key
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+// ============= MAILCHIMP NEWSLETTER SETTINGS =============
+const MAILCHIMP_API_KEY = process.env.MAILCHIMP_API_KEY;
+const MAILCHIMP_AUDIENCE_ID = process.env.MAILCHIMP_AUDIENCE_ID;
+const NEWSLETTER_ENABLED = process.env.NEWSLETTER_ENABLED === 'true';
+const NEWSLETTER_SEND_MODE = process.env.NEWSLETTER_SEND_MODE || 'draft'; // 'draft', 'test', or 'live'
+const NEWSLETTER_TEST_EMAILS = process.env.NEWSLETTER_TEST_EMAILS || ''; // comma-separated
+const NEWSLETTER_FROM_NAME = process.env.NEWSLETTER_FROM_NAME || 'RunV';
+const NEWSLETTER_REPLY_TO = process.env.NEWSLETTER_REPLY_TO || '';
+
+// Brand customization for newsletter template
+const BRAND_LOGO_URL = process.env.BRAND_LOGO_URL || 'https://runv.app/wp-content/uploads/2025/06/runV-8-1.png';
+const BRAND_PRIMARY_COLOR = process.env.BRAND_PRIMARY_COLOR || '#2BEBE2';
+const BRAND_CTA_COLOR = process.env.BRAND_CTA_COLOR || '#FE6F28';
+const BRAND_WEBSITE_URL = process.env.BRAND_WEBSITE_URL || 'https://runv.app';
+const BRAND_INSTAGRAM_URL = process.env.BRAND_INSTAGRAM_URL || '';
+const BRAND_FACEBOOK_URL = process.env.BRAND_FACEBOOK_URL || '';
+const BRAND_TAGLINE = process.env.BRAND_TAGLINE || 'Your Running & Fitness Update';
+
+// ============= MAILCHIMP API FUNCTIONS =============
+
+/**
+ * Get Mailchimp data center from API key
+ */
+function getMailchimpDC(apiKey) {
+  const parts = apiKey.split('-');
+  return parts[1] || 'us1';
+}
+
+/**
+ * Make Mailchimp API request
+ */
+async function mailchimpApiRequest(endpoint, method = 'GET', data = null) {
+  if (!MAILCHIMP_API_KEY) {
+    console.error('Mailchimp API key not configured');
+    return { error: 'Mailchimp API key not configured' };
+  }
+
+  const dc = getMailchimpDC(MAILCHIMP_API_KEY);
+  const url = `https://${dc}.api.mailchimp.com/3.0${endpoint}`;
+  
+  console.log(`Mailchimp API Request - ${method} ${url}`);
+
+  const headers = {
+    'Authorization': 'Basic ' + Buffer.from(`anystring:${MAILCHIMP_API_KEY}`).toString('base64'),
+    'Content-Type': 'application/json'
+  };
+
+  const options = {
+    method,
+    headers
+  };
+
+  if (data && ['POST', 'PUT', 'PATCH'].includes(method)) {
+    options.body = JSON.stringify(data);
+    console.log('Request body:', JSON.stringify(data).substring(0, 300) + '...');
+  }
+
+  try {
+    const response = await fetch(url, options);
+    const statusCode = response.status;
+    
+    // Handle empty response (success for some actions like test send)
+    const text = await response.text();
+    if (!text && statusCode >= 200 && statusCode < 300) {
+      console.log('Empty response with success status - operation completed');
+      return { success: true, status_code: statusCode };
+    }
+
+    const result = text ? JSON.parse(text) : {};
+    result._http_status = statusCode;
+    
+    console.log(`Mailchimp API Response (HTTP ${statusCode}):`, JSON.stringify(result).substring(0, 500));
+    
+    return result;
+  } catch (error) {
+    console.error('Mailchimp API Error:', error.message);
+    return { error: error.message };
+  }
+}
+
+/**
+ * Generate newsletter body content using AI
+ */
+async function generateNewsletterBodyWithAI(title, content) {
+  // Truncate content to avoid token limits
+  const truncatedContent = content.substring(0, 3000);
+  
+  // Get current day and time context for personalized intro
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const now = new Date();
+  const dayOfWeek = days[now.getDay()];
+  const hour = now.getHours();
+  const timeOfDay = hour < 12 ? 'morning' : (hour < 17 ? 'afternoon' : 'evening');
+  const month = months[now.getMonth()];
+  
+  // Random greeting styles for diversity
+  const greetingStyles = {
+    'casual_friend': 'like texting a running buddy',
+    'enthusiastic_coach': 'like an excited running coach',
+    'warm_neighbor': 'like a friendly neighbor who loves running',
+    'fellow_runner': 'like a fellow runner sharing exciting news',
+    'motivational': 'like a supportive teammate cheering you on'
+  };
+  const styleKeys = Object.keys(greetingStyles);
+  const randomStyleKey = styleKeys[Math.floor(Math.random() * styleKeys.length)];
+  const randomStyle = greetingStyles[randomStyleKey];
+
+  const prompt = `You are writing a newsletter email for ${NEWSLETTER_FROM_NAME}, a running and fitness brand.
+
+Article Title: ${title}
+
+Article Content Summary:
+${truncatedContent}
+
+Current Context: It's ${dayOfWeek} ${timeOfDay} in ${month}.
+
+Write the newsletter with TWO parts:
+
+**PART 1 - PERSONAL INTRO (VERY IMPORTANT):**
+Write a warm, informal greeting that sounds ${randomStyle}. This intro should:
+- Start with a casual, friendly greeting (NOT "Dear subscriber" - think "Hey there!" or "Hi friend!" or "Happy ${dayOfWeek}!")
+- Be 2-3 sentences max
+- Sound genuinely human and conversational
+- Can reference the day/week/season naturally
+- Build excitement for what's coming
+- DO NOT use the subscriber's name (we don't have it)
+- VARY your greeting style - don't always use the same opening!
+
+Example intros (use as inspiration, don't copy exactly):
+- "Hey there, runner! 👋 Hope your week's been treating you well..."
+- "Happy ${dayOfWeek}! Got something exciting to share with you today..."
+- "Hi friend! Quick pause from your busy day for some running goodness..."
+
+**PART 2 - MAIN CONTENT:**
+After the intro, write the main newsletter body that:
+1. Transitions naturally from the intro
+2. Highlights 2-3 key takeaways from the article
+3. Creates curiosity without giving everything away
+4. Ends with a teaser that encourages clicking "Read Full Article"
+5. Uses a friendly, energetic tone
+
+Total length: 120-180 words (including intro).
+
+Format as clean HTML with <p> tags. Do NOT include the article title as a heading, header, or any buttons - just the intro and body content.
+Do NOT use bullet points or lists - write in flowing paragraph style.
+
+Write the newsletter now:`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'gpt-4o',
+    });
+
+    let newsletterBody = completion.choices[0].message.content || '';
+    
+    // Ensure it has paragraph tags
+    if (!newsletterBody.includes('<p>')) {
+      newsletterBody = '<p>' + newsletterBody.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+    }
+    
+    // Style the paragraphs
+    newsletterBody = newsletterBody.replace(/<p>/g, '<p style="color: #666666; font-size: 16px; line-height: 1.6; margin: 0 0 15px 0;">');
+    
+    console.log(`Generated newsletter body (${newsletterBody.length} chars)`);
+    return newsletterBody;
+  } catch (error) {
+    console.error('Newsletter body generation failed:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Generate newsletter subject line
+ */
+function generateNewsletterSubject(title) {
+  const prefixes = ['📖 New Post:', '✨ Fresh Content:', '🎯 Just Published:', '💪 New Article:', '🏃 Running Update:'];
+  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+  
+  // Trim title to ~8 words
+  const words = title.split(' ').slice(0, 8).join(' ');
+  return `${prefix} ${words}`;
+}
+
+/**
+ * Generate newsletter HTML content
+ */
+async function generateNewsletterHTML(title, content, featuredImageUrl, articleUrl) {
+  // Generate AI-powered newsletter content
+  let newsletterBody = await generateNewsletterBodyWithAI(title, content);
+  
+  if (!newsletterBody) {
+    // Fallback to simple excerpt if AI fails
+    const excerpt = content.replace(/<[^>]*>/g, '').substring(0, 300);
+    newsletterBody = `<p style="color: #666666; font-size: 16px; line-height: 1.6; margin: 0 0 15px 0;">${excerpt}...</p>`;
+  }
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+    <table role="presentation" style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 20px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <!-- Header with Branding -->
+                    <tr>
+                        <td style="background-color: ${BRAND_PRIMARY_COLOR}; padding: 25px 30px; text-align: center;">
+                            <img src="${BRAND_LOGO_URL}" alt="${NEWSLETTER_FROM_NAME}" style="max-width: 180px; height: auto; display: inline-block;">
+                            <p style="color: #ffffff; margin: 12px 0 0 0; font-size: 14px; text-shadow: 0 1px 2px rgba(0,0,0,0.2);">${BRAND_TAGLINE}</p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Featured Image -->
+                    ${featuredImageUrl ? `<tr>
+                        <td>
+                            <img src="${featuredImageUrl}" alt="${title}" style="width: 100%; height: auto; display: block;">
+                        </td>
+                    </tr>` : ''}
+                    
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 30px;">
+                            <h2 style="color: #1a1a2e; margin: 0 0 15px 0; font-size: 24px; line-height: 1.3;">${title}</h2>
+                            ${newsletterBody}
+                            <div style="margin-top: 25px;">
+                                <a href="${articleUrl}" style="display: inline-block; background-color: ${BRAND_CTA_COLOR}; color: #ffffff; padding: 14px 35px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">Read Full Article →</a>
+                            </div>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: ${BRAND_PRIMARY_COLOR}; padding: 30px 20px;">
+                            <!-- Logo -->
+                            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
+                                <tr>
+                                    <td style="text-align: center;">
+                                        <img src="${BRAND_LOGO_URL}" alt="${NEWSLETTER_FROM_NAME}" style="height: 35px; width: auto;">
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <!-- Navigation Links -->
+                            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
+                                <tr>
+                                    <td style="text-align: center;">
+                                        <a href="${BRAND_WEBSITE_URL}" style="color: #000000; text-decoration: none; font-size: 14px; margin: 0 15px;">Website</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <!-- Social Icons -->
+                            ${(BRAND_INSTAGRAM_URL || BRAND_FACEBOOK_URL) ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
+                                <tr>
+                                    <td style="text-align: center;">
+                                        ${BRAND_INSTAGRAM_URL ? `<a href="${BRAND_INSTAGRAM_URL}" style="display: inline-block; margin: 0 8px;">
+                                            <img src="https://cdn-icons-png.flaticon.com/512/174/174855.png" alt="Instagram" style="width: 28px; height: 28px;">
+                                        </a>` : ''}
+                                        ${BRAND_FACEBOOK_URL ? `<a href="${BRAND_FACEBOOK_URL}" style="display: inline-block; margin: 0 8px;">
+                                            <img src="https://cdn-icons-png.flaticon.com/512/124/124010.png" alt="Facebook" style="width: 28px; height: 28px;">
+                                        </a>` : ''}
+                                    </td>
+                                </tr>
+                            </table>` : ''}
+                            
+                            <!-- Unsubscribe -->
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td style="text-align: center;">
+                                        <p style="color: #000000; font-size: 11px; margin: 0;">
+                                            You're receiving this because you subscribed to ${NEWSLETTER_FROM_NAME} updates.<br>
+                                            <a href="*|UNSUB|*" style="color: #000000; text-decoration: underline;">Unsubscribe</a>
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>`;
+
+  return html;
+}
+
+/**
+ * Generate and send newsletter for a published article
+ */
+async function generateAndSendNewsletter(title, content, featuredImageUrl, articleUrl) {
+  console.log('========================================');
+  console.log('STARTING NEWSLETTER GENERATION');
+  console.log('Article:', title);
+  console.log('========================================');
+
+  if (!NEWSLETTER_ENABLED) {
+    console.log('Newsletter is disabled - skipping');
+    return false;
+  }
+
+  if (!MAILCHIMP_API_KEY) {
+    console.error('ERROR - Mailchimp API key not configured');
+    return false;
+  }
+
+  if (!MAILCHIMP_AUDIENCE_ID) {
+    console.error('ERROR - Mailchimp audience ID not configured');
+    return false;
+  }
+
+  console.log(`Newsletter settings - Mode: ${NEWSLETTER_SEND_MODE}, From: ${NEWSLETTER_FROM_NAME}`);
+
+  // Generate newsletter content
+  const newsletterHtml = await generateNewsletterHTML(title, content, featuredImageUrl, articleUrl);
+  const subjectLine = generateNewsletterSubject(title);
+  
+  // Strip HTML for preview text
+  const previewText = content.replace(/<[^>]*>/g, '').substring(0, 100);
+
+  console.log('Generated newsletter content:');
+  console.log('- Subject:', subjectLine);
+  console.log('- HTML length:', newsletterHtml.length, 'characters');
+
+  if (!newsletterHtml || newsletterHtml.length < 100) {
+    console.error('ERROR - Newsletter HTML is empty or too short!');
+    return false;
+  }
+
+  // Create campaign
+  const campaignData = {
+    type: 'regular',
+    recipients: {
+      list_id: MAILCHIMP_AUDIENCE_ID
+    },
+    settings: {
+      subject_line: subjectLine,
+      preview_text: previewText,
+      title: 'Newsletter: ' + title.substring(0, 50),
+      from_name: NEWSLETTER_FROM_NAME,
+      reply_to: NEWSLETTER_REPLY_TO || 'noreply@example.com',
+      auto_footer: true
+    }
+  };
+
+  console.log('Creating Mailchimp campaign...');
+  const campaign = await mailchimpApiRequest('/campaigns', 'POST', campaignData);
+
+  if (campaign.error || campaign.detail || (campaign._http_status && campaign._http_status >= 400)) {
+    console.error('ERROR creating campaign:', JSON.stringify(campaign));
+    return false;
+  }
+
+  if (!campaign.id) {
+    console.error('ERROR - No campaign ID in response:', JSON.stringify(campaign));
+    return false;
+  }
+
+  const campaignId = campaign.id;
+  console.log('SUCCESS - Created Mailchimp campaign:', campaignId);
+
+  // Set campaign content
+  console.log('Setting campaign content...');
+  const contentResult = await mailchimpApiRequest(`/campaigns/${campaignId}/content`, 'PUT', {
+    html: newsletterHtml
+  });
+
+  if (contentResult.error || contentResult.detail || (contentResult._http_status && contentResult._http_status >= 400)) {
+    console.error('ERROR setting campaign content:', JSON.stringify(contentResult));
+    return false;
+  }
+
+  console.log('SUCCESS - Campaign content set!');
+
+  // Handle send mode
+  if (NEWSLETTER_SEND_MODE === 'live') {
+    console.log('Sending to ALL subscribers (live mode)...');
+    const sendResult = await mailchimpApiRequest(`/campaigns/${campaignId}/actions/send`, 'POST');
+
+    if (sendResult.error || sendResult.detail || (sendResult._http_status && sendResult._http_status >= 400)) {
+      console.error('ERROR sending:', JSON.stringify(sendResult));
+      return false;
+    }
+
+    console.log('SUCCESS - Newsletter sent to all subscribers!');
+    return true;
+
+  } else if (NEWSLETTER_SEND_MODE === 'test') {
+    // Send to test emails only
+    const testEmailArray = NEWSLETTER_TEST_EMAILS.split(',').map(e => e.trim()).filter(e => e);
+
+    if (testEmailArray.length === 0) {
+      console.error('ERROR - No test emails configured! Please add NEWSLETTER_TEST_EMAILS in env.');
+      return false;
+    }
+
+    console.log('Test mode - sending to:', testEmailArray.join(', '));
+
+    const testResult = await mailchimpApiRequest(`/campaigns/${campaignId}/actions/test`, 'POST', {
+      test_emails: testEmailArray,
+      send_type: 'html'
+    });
+
+    if (testResult.error || testResult.detail || (testResult._http_status && testResult._http_status >= 400)) {
+      console.error('ERROR sending test:', JSON.stringify(testResult));
+      return false;
+    }
+
+    console.log('========================================');
+    console.log('SUCCESS - Test newsletter sent!');
+    console.log('Sent to:', testEmailArray.join(', '));
+    console.log('Campaign ID:', campaignId);
+    console.log('Check inbox AND spam folder!');
+    console.log('========================================');
+    return true;
+
+  } else {
+    // Draft mode - just save
+    console.log('Draft mode - Newsletter saved as draft');
+    console.log('Campaign ID:', campaignId);
+    console.log('Log into Mailchimp to review and send manually.');
+    return true;
+  }
+}
+
 // Insert product promotion banners
 function insertProductPromotion(htmlContent) {
   const { window } = new JSDOM(htmlContent);
@@ -829,12 +1261,20 @@ async function createArticleOnShopify(title, htmlContent, metaDescription, image
       console.log(responseData);
       const shopDomain = process.env.SHOP_DOMAIN; // Add this to your .env file
       const articleHandle = responseData.article.handle;
-      const blogHandle = 'news'; // Replace with your blog's actual handle
+      const blogHandle = process.env.BLOG_HANDLE || 'news'; // Replace with your blog's actual handle
       const articleUrl = `https://${shopDomain}/blogs/${blogHandle}/${articleHandle}`;
       console.log('Article URL:', articleUrl);
 
       // After successfully creating the article, generate and post to social media
       await generateAndPostToSocialMedia(title, htmlContent, imageUrl, articleUrl);
+
+      // Generate and send newsletter via Mailchimp
+      if (NEWSLETTER_ENABLED) {
+        console.log('Newsletter enabled - generating and sending...');
+        await generateAndSendNewsletter(title, htmlContent, imageUrl, articleUrl);
+      } else {
+        console.log('Newsletter disabled - skipping.');
+      }
     } else {
       console.log('Failed to create article on Shopify.');
       console.log('Error:', responseData);
@@ -981,4 +1421,3 @@ server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   performScheduledTask();
 });
-
