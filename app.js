@@ -175,6 +175,7 @@ Total length: 120-180 words (including intro).
 
 Format as clean HTML with <p> tags. Do NOT include the article title as a heading, header, or any buttons - just the intro and body content.
 Do NOT use bullet points or lists - write in flowing paragraph style.
+IMPORTANT: Return ONLY the HTML content without any code fences (no \`\`\`html or \`\`\` markers). Just return the raw HTML directly.
 
 Write the newsletter now:`;
 
@@ -185,6 +186,12 @@ Write the newsletter now:`;
     });
 
     let newsletterBody = completion.choices[0].message.content || '';
+    
+    // Remove code fences (```html and ```)
+    newsletterBody = newsletterBody.replace(/```html|```/g, '');
+    
+    // Remove any markdown code block markers
+    newsletterBody = newsletterBody.replace(/```[\s\S]*?```/g, '');
     
     // Ensure it has paragraph tags
     if (!newsletterBody.includes('<p>')) {
@@ -281,7 +288,7 @@ async function generateNewsletterHTML(title, content, featuredImageUrl, articleU
                             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
                                 <tr>
                                     <td style="text-align: center;">
-                                        <a href="${BRAND_WEBSITE_URL}" style="color: #000000; text-decoration: none; font-size: 14px; margin: 0 15px;">Website</a>
+                                        <a href="${BRAND_WEBSITE_URL}" style="color: #ffffff; text-decoration: none; font-size: 14px; margin: 0 15px;">Website</a>
                                     </td>
                                 </tr>
                             </table>
@@ -304,9 +311,9 @@ async function generateNewsletterHTML(title, content, featuredImageUrl, articleU
                             <table width="100%" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td style="text-align: center;">
-                                        <p style="color: #000000; font-size: 11px; margin: 0;">
+                                        <p style="color: #ffffff; font-size: 11px; margin: 0;">
                                             You're receiving this because you subscribed to ${NEWSLETTER_FROM_NAME} updates.<br>
-                                            <a href="*|UNSUB|*" style="color: #000000; text-decoration: underline;">Unsubscribe</a>
+                                            <a href="*|UNSUB|*" style="color: #ffffff; text-decoration: underline;">Unsubscribe</a>
                                         </p>
                                     </td>
                                 </tr>
@@ -433,6 +440,8 @@ async function generateAndSendNewsletter(title, content, featuredImageUrl, artic
     }
 
     console.log('Test mode - sending to:', testEmailArray.join(', '));
+    console.log('NOTE: Mailchimp will automatically add "THIS IS A TEST MESSAGE" to test emails.');
+    console.log('To avoid this, use NEWSLETTER_SEND_MODE=draft and send manually from Mailchimp dashboard.');
 
     const testResult = await mailchimpApiRequest(`/campaigns/${campaignId}/actions/test`, 'POST', {
       test_emails: testEmailArray,
@@ -448,6 +457,7 @@ async function generateAndSendNewsletter(title, content, featuredImageUrl, artic
     console.log('SUCCESS - Test newsletter sent!');
     console.log('Sent to:', testEmailArray.join(', '));
     console.log('Campaign ID:', campaignId);
+    console.log('NOTE: "THIS IS A TEST MESSAGE" is automatically added by Mailchimp - cannot be removed via API');
     console.log('Check inbox AND spam folder!');
     console.log('========================================');
     return true;
