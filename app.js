@@ -38,14 +38,31 @@ const NEWSLETTER_TEST_EMAILS = process.env.NEWSLETTER_TEST_EMAILS || ''; // comm
 const NEWSLETTER_FROM_NAME = process.env.NEWSLETTER_FROM_NAME || 'RunV';
 const NEWSLETTER_REPLY_TO = process.env.NEWSLETTER_REPLY_TO || '';
 
+// Newsletter only on Monday (1) and Friday (5)
+const NEWSLETTER_DAYS = [1, 5]; // 0=Sunday, 1=Monday, ..., 5=Friday, 6=Saturday
+
+/**
+ * Check if today is a newsletter day (Monday or Friday)
+ */
+function isNewsletterDay() {
+  const today = new Date().getDay();
+  return NEWSLETTER_DAYS.includes(today);
+}
+
 // Brand customization for newsletter template
 const BRAND_LOGO_URL = process.env.BRAND_LOGO_URL || 'https://runv.app/wp-content/uploads/2025/06/runV-8-1.png';
 const BRAND_PRIMARY_COLOR = process.env.BRAND_PRIMARY_COLOR || '#2BEBE2';
 const BRAND_CTA_COLOR = process.env.BRAND_CTA_COLOR || '#FE6F28';
-const BRAND_WEBSITE_URL = process.env.BRAND_WEBSITE_URL || 'https://runv.app';
+const BRAND_WEBSITE_URL = process.env.BRAND_WEBSITE_URL || 'https://vorlich.com';
 const BRAND_INSTAGRAM_URL = process.env.BRAND_INSTAGRAM_URL || '';
 const BRAND_FACEBOOK_URL = process.env.BRAND_FACEBOOK_URL || '';
 const BRAND_TAGLINE = process.env.BRAND_TAGLINE || 'Your Running & Fitness Update';
+
+// Additional footer navigation links
+const BRAND_RUNNING_GIFTS_URL = process.env.BRAND_RUNNING_GIFTS_URL || 'https://vorlich.com/collections/running-and-triathlon-gifts';
+const BRAND_RUNNING_ACCESSORIES_URL = process.env.BRAND_RUNNING_ACCESSORIES_URL || 'https://vorlich.com/collections/running-triathlon-accessories';
+const BRAND_FAQS_URL = process.env.BRAND_FAQS_URL || 'https://vorlich.com/pages/faq';
+const BRAND_CONTACT_URL = process.env.BRAND_CONTACT_URL || 'https://vorlich.com/pages/contact';
 
 // ============= MAILCHIMP API FUNCTIONS =============
 
@@ -288,7 +305,13 @@ async function generateNewsletterHTML(title, content, featuredImageUrl, articleU
                             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
                                 <tr>
                                     <td style="text-align: center;">
-                                        <a href="${BRAND_WEBSITE_URL}" style="color: #ffffff; text-decoration: none; font-size: 14px; margin: 0 15px;">Website</a>
+                                        <a href="${BRAND_RUNNING_GIFTS_URL}" style="color: #ffffff; text-decoration: none; font-size: 13px; margin: 0 8px;">Running Gifts</a>
+                                        <span style="color: #ffffff;">|</span>
+                                        <a href="${BRAND_RUNNING_ACCESSORIES_URL}" style="color: #ffffff; text-decoration: none; font-size: 13px; margin: 0 8px;">Accessories</a>
+                                        <span style="color: #ffffff;">|</span>
+                                        <a href="${BRAND_FAQS_URL}" style="color: #ffffff; text-decoration: none; font-size: 13px; margin: 0 8px;">FAQs</a>
+                                        <span style="color: #ffffff;">|</span>
+                                        <a href="${BRAND_CONTACT_URL}" style="color: #ffffff; text-decoration: none; font-size: 13px; margin: 0 8px;">Contact Us</a>
                                     </td>
                                 </tr>
                             </table>
@@ -564,32 +587,70 @@ function formatInternalLinksForAI(internalLinks) {
 }
 
 // ============= EXTERNAL LINKS =============
+
+// Vorlich product catalog for AI to reference
+const VORLICH_PRODUCTS = `
+VORLICH PRODUCTS (use these instead of competitor products when the topic relates to these items):
+
+1. Running Gift Box (Orange) - "Vorlich Running Gift Box" - https://vorlich.com/products/rungiftbox
+   Perfect gift for runners with 13 essential items including running belt, anti-chafing balm, LED headtorch, water bottle.
+
+2. Running Gift Box (Aqua) - "Vorlich Running Gift Box Aqua" - https://vorlich.com/products/vorlich%C2%AE-running-gift-box-13-essential-items-for-runners-for-runners-female-men-includes-running-belt-anti-chafing-balm-led-headtorch-folding-water-bottle-more-aqua
+   Same great gift box in aqua color.
+
+3. Race Bib and Medal Display - "Vorlich Medal Display" - https://vorlich.com/products/race-bib-and-medal-display
+   Display your race bibs and medals proudly.
+
+4. Bundle - Running Gift Box + Medal Display - "Vorlich Bundle" - https://vorlich.com/products/bundle-running-gift-box-race-bid-medal-display
+   Complete runner's bundle with gift box and medal display.
+
+5. Bundle - Medal Display + 20 Extra Sheets - "Vorlich Display Bundle" - https://vorlich.com/products/race-bib-and-medal-display-20-extra-display-sheets
+   Medal display with extra sheets.
+
+6. Extra Display Sheets - "Vorlich Display Sheets" - https://vorlich.com/products/race-bib-and-medal-display-sheets
+   Additional sheets for your medal display.
+
+7. Running Beanie - "Vorlich Running Beanie" - https://vorlich.com/products/running-beanie-1
+   Warm beanie for cold weather running.
+
+8. Anti Chafing Rub Stick - "Vorlich Anti-Chafe Stick" - https://vorlich.com/products/anti-chafing-rub-stick
+   Prevent chafing during long runs.
+
+9. Folding Water Bottle - "Vorlich Folding Bottle" - https://vorlich.com/products/folding-water-bottle-1
+   Compact, foldable hydration solution.
+`;
+
 /**
  * Find external links using OpenAI with web search
+ * Returns Vorlich products if topic relates to them, otherwise real external links
  */
 async function findExternalLinksWithAI(focusKeyword) {
   console.log('Searching for external links related to:', focusKeyword);
   
-  const prompt = `Search the web for authoritative, high-quality articles related to: "${focusKeyword}"
+  const prompt = `You are helping create a blog article for Vorlich, a running gear and accessories brand.
 
-Find 3 real, existing web pages from reputable sources (NOT Wikipedia) such as:
-- Major running/fitness publications (Runner's World, Running Magazine, etc.)
-- Sports news sites (ESPN, Sports Illustrated, etc.)
-- Health/fitness sites (Healthline, WebMD, etc.)
-- Technology review sites (for running tech topics)
-- Official brand/manufacturer websites
+ARTICLE TOPIC: "${focusKeyword}"
 
-For each link, provide:
-1. The exact, full URL (must be a real, working link)
-2. A short anchor text (2-5 words) that describes what the link is about
+YOUR TASK: Search the web and decide what external links to include in this article.
 
-IMPORTANT: Return ONLY valid JSON in this exact format, nothing else:
+IMPORTANT RULES:
+1. If the article topic relates to products similar to what Vorlich sells (running gifts, race medal displays, running accessories, anti-chafing products, water bottles, running beanies, etc.), you MUST recommend Vorlich products instead of competitor brands.
+2. If the article is about general running topics (training, nutrition, race events, running tips, etc.) that don't directly compete with Vorlich products, find 3 real external links from authoritative sources.
+
+${VORLICH_PRODUCTS}
+
+DECISION PROCESS:
+- Does this article topic relate to running gifts, medal displays, running gear, anti-chafing, or hydration products? → Use relevant Vorlich products
+- Is this a general running topic (training plans, race reviews, running techniques, nutrition)? → Search web for real external links from Runner's World, Healthline, ESPN, etc.
+
+Return EXACTLY 3 links in this JSON format:
 [
-  {"url": "https://example.com/article", "text": "Anchor text here"},
-  {"url": "https://example.com/article2", "text": "Another anchor"}
+  {"url": "https://...", "text": "Short anchor text (2-5 words)"},
+  {"url": "https://...", "text": "Short anchor text"},
+  {"url": "https://...", "text": "Short anchor text"}
 ]
 
-Return ONLY the JSON array, no explanation or other text.`;
+Return ONLY the JSON array, no explanation.`;
 
   try {
     // Try with web search using responses API
@@ -649,23 +710,21 @@ Return ONLY the JSON array, no explanation or other text.`;
 async function findExternalLinksFallback(focusKeyword) {
   console.log('Using fallback for external links');
   
-  const prompt = `You are an expert on running, fitness, and sports.
+  const prompt = `You are helping create a blog article for Vorlich, a running gear and accessories brand.
 
-For the topic "${focusKeyword}", suggest 3 authoritative external websites that would have relevant content. 
+ARTICLE TOPIC: "${focusKeyword}"
 
-Choose from well-known sources like:
-- runnersworld.com
-- active.com  
-- verywellfit.com
-- outsideonline.com
-- trainingpeaks.com
-- strava.com/blog
-- podiumrunner.com
+${VORLICH_PRODUCTS}
 
-Return ONLY valid JSON in this exact format:
+DECISION PROCESS:
+- If this topic relates to running gifts, medal displays, running gear, anti-chafing, or hydration products → Use relevant Vorlich products
+- If this is a general running topic → Use well-known sources like runnersworld.com, active.com, verywellfit.com, outsideonline.com
+
+Return EXACTLY 3 links in this JSON format:
 [
-  {"url": "https://www.runnersworld.com/", "text": "Runner's World"},
-  {"url": "https://www.active.com/running", "text": "Active Running"}
+  {"url": "https://...", "text": "Short anchor text (2-5 words)"},
+  {"url": "https://...", "text": "Short anchor text"},
+  {"url": "https://...", "text": "Short anchor text"}
 ]
 
 Return ONLY the JSON array.`;
@@ -720,63 +779,19 @@ function parseExternalLinksJson(responseText) {
 }
 
 /**
- * Add external links to article content
+ * Format external links for AI prompt (natural insertion)
  */
-function addExternalLinks(htmlContent, externalLinks) {
+function formatExternalLinksForAI(externalLinks) {
   if (!externalLinks || externalLinks.length === 0) {
-    return htmlContent;
-  }
-
-  const { window } = new JSDOM(htmlContent);
-  const { document } = window;
-  
-  const paragraphs = document.querySelectorAll('p');
-  const paragraphCount = paragraphs.length;
-  
-  if (paragraphCount < 3) {
-    console.log('Not enough paragraphs for external links');
-    return htmlContent;
+    return '';
   }
   
-  let linksAdded = 0;
-  const maxLinks = Math.min(2, externalLinks.length);
+  let formatted = "EXTERNAL LINKS TO USE (include all 3 naturally within relevant paragraphs):\n";
+  externalLinks.forEach((link, index) => {
+    formatted += `${index + 1}. "${link.text}" - ${link.url}\n`;
+  });
   
-  // Add external links to middle paragraphs (at 40% and 70% positions)
-  const linkPositions = [
-    Math.floor(paragraphCount * 0.4),
-    Math.floor(paragraphCount * 0.7)
-  ];
-  
-  for (let i = 0; i < linkPositions.length && linksAdded < maxLinks; i++) {
-    const pos = linkPositions[i];
-    if (pos < paragraphCount && externalLinks[linksAdded]) {
-      const paragraph = paragraphs[pos];
-      if (paragraph) {
-        const linkData = externalLinks[linksAdded];
-        
-        // Create external link with proper attributes
-        const link = document.createElement('a');
-        link.href = linkData.url;
-        link.textContent = linkData.text;
-        link.setAttribute('target', '_blank');
-        link.setAttribute('rel', 'noopener noreferrer');
-        
-        // Append to paragraph
-        paragraph.appendChild(document.createTextNode(' ('));
-        paragraph.appendChild(link);
-        paragraph.appendChild(document.createTextNode(')'));
-        
-        linksAdded++;
-        console.log('Added external link:', linkData.url);
-      }
-    }
-  }
-  
-  if (linksAdded > 0) {
-    console.log(`Successfully added ${linksAdded} external links`);
-  }
-  
-  return document.documentElement.innerHTML;
+  return formatted;
 }
 
 (async () => {
@@ -792,7 +807,12 @@ async function rewriteArticleContent(articleTitle) {
     const internalLinks = await getAvailableInternalLinks(20);
     const internalLinksText = formatInternalLinksForAI(internalLinks);
     
-    // Build the prompt with internal links requirement
+    // Get external links using AI web search (may include Vorlich products or external sources)
+    console.log('Finding external links with AI web search...');
+    const externalLinks = await findExternalLinksWithAI(articleTitle);
+    const externalLinksText = formatExternalLinksForAI(externalLinks);
+    
+    // Build the prompt with both internal and external links requirement
     let prompt = `write a Running blog article with detailed informations about the topic: \n${articleTitle}\n\n Make it long and more detailed and informative, in HTML format:\n1. without header and footer\n2. the first thing must be an introduction within a paragraph\n3. the second thing is the article outline, with the functionality to jump to sections\n 4. section titles must be within an h2\n5. use lists (ul - ol) to make things clear and organized\n6. highlight improtant things using bold style\n7. optimized for SEO (use relevant tags for the best SEO ranking)\n8. adjust it to be readable and coherent, and make it long with a focus on improving its search engine visibility by strategically integrating relevant keywords. Make sure the revised content maintains a conversational tone and enhances readability by simplifying complex sentences. Additionally, ensure that the information remains accurate and comprehensive while presenting it in a more engaging and coherent manner.\n
               When optimizing for SEO, include relevant keywords in the article while ensuring their natural incorporation. Improve the readability by breaking down long paragraphs, using bullet points where necessary, and ensuring a smooth flow of ideas.`;
     
@@ -801,9 +821,14 @@ async function rewriteArticleContent(articleTitle) {
       prompt += `\n\nINTERNAL LINKING REQUIREMENT:\nYou MUST include exactly 3 internal links from the list below. Insert them naturally within relevant paragraphs as HTML anchor tags.\nFormat: <a href="URL">anchor text</a>\nChoose links that relate to the content and flow naturally in context.\n\n${internalLinksText}`;
     }
     
+    // Add external links requirement if available
+    if (externalLinksText) {
+      prompt += `\n\nEXTERNAL LINKING REQUIREMENT:\nYou MUST include all 3 external links from the list below. Insert them naturally within relevant paragraphs as HTML anchor tags with target="_blank" and rel="noopener noreferrer".\nFormat: <a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>\nChoose contextually appropriate places where the link topic relates to the paragraph content.\n\n${externalLinksText}`;
+    }
+    
     prompt += '\n\n###';
     
-    console.log(`Generating article with ${internalLinks.length} internal links available`);
+    console.log(`Generating article with ${internalLinks.length} internal links and ${externalLinks.length} external links`);
     
     const completion = await openai.chat.completions.create({
       messages: [
@@ -841,11 +866,6 @@ async function rewriteArticleContent(articleTitle) {
 
     // Insert product promotion banners
     htmlContent = insertProductPromotion(htmlContent);
-    
-    // Add external links using AI web search
-    console.log('Adding external links...');
-    const externalLinks = await findExternalLinksWithAI(articleTitle);
-    htmlContent = addExternalLinks(htmlContent, externalLinks);
 
     return htmlContent;
   } catch (error) {
@@ -1230,7 +1250,7 @@ function insertSignUpForm(htmlContent, signUpFormHtml) {
 }
 
 // Function to create the article on Shopify
-async function createArticleOnShopify(title, htmlContent, metaDescription, imageUrl, tags) {
+async function createArticleOnShopify(title, htmlContent, metaDescription, imageUrl, tags, forceNewsletter = false) {
     const modifiedHtmlContent = insertSignUpForm(htmlContent, signUpFormHtml);
   // Article data
   const articleData = {
@@ -1278,10 +1298,22 @@ async function createArticleOnShopify(title, htmlContent, metaDescription, image
       // After successfully creating the article, generate and post to social media
       await generateAndPostToSocialMedia(title, htmlContent, imageUrl, articleUrl);
 
-      // Generate and send newsletter via Mailchimp
+      // Generate and send newsletter via Mailchimp (only on Monday/Friday or if forced)
       if (NEWSLETTER_ENABLED) {
-        console.log('Newsletter enabled - generating and sending...');
-        await generateAndSendNewsletter(title, htmlContent, imageUrl, articleUrl);
+        const newsletterDay = isNewsletterDay();
+        const shouldSendNewsletter = forceNewsletter || newsletterDay;
+        
+        if (shouldSendNewsletter) {
+          if (forceNewsletter && !newsletterDay) {
+            console.log('Newsletter forced (server restart) - generating and sending...');
+          } else {
+            console.log('Newsletter day (Monday/Friday) - generating and sending...');
+          }
+          await generateAndSendNewsletter(title, htmlContent, imageUrl, articleUrl);
+        } else {
+          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          console.log(`Newsletter skipped - today is ${days[new Date().getDay()]}. Newsletter only on Monday/Friday.`);
+        }
       } else {
         console.log('Newsletter disabled - skipping.');
       }
@@ -1295,7 +1327,7 @@ async function createArticleOnShopify(title, htmlContent, metaDescription, image
 }
 
 // Function to post an article
-async function postArticle(articleTitle) {
+async function postArticle(articleTitle, forceNewsletter = false) {
   const rewrittenContent = await rewriteArticleContent(articleTitle);
   if (rewrittenContent) {
     const rewrittenTitle = articleTitle;
@@ -1322,7 +1354,7 @@ async function postArticle(articleTitle) {
         // const imageUrl = image.data[0].url;
         if (imageUrl) {
           console.log('Rewritten Title:', rewrittenTitle);
-          createArticleOnShopify(rewrittenTitle, rewrittenContent, metaDescription, imageUrl, seoKeywords);
+          createArticleOnShopify(rewrittenTitle, rewrittenContent, metaDescription, imageUrl, seoKeywords, forceNewsletter);
         }
       } else {
         console.log('Failed to generate meta description.');
@@ -1390,8 +1422,11 @@ async function returnFirstTitle(filePath, title) {
 }
 
 // Function to perform the scheduled task
-async function performScheduledTask() {
+async function performScheduledTask(forceNewsletter = false) {
   console.log('Running the task');
+  if (forceNewsletter) {
+    console.log('SERVER RESTART - Newsletter will be forced regardless of day');
+  }
   const directoryPath = './articles_topics.txt'; // Directory containing the articles
   const articleTitle = await getAndRemoveFirstTitle(directoryPath);
   console.log(articleTitle);
@@ -1399,11 +1434,11 @@ async function performScheduledTask() {
 
   if (articleTitle && articleTitle.trim().length > 0) {
     console.log('title exist');
-    postArticle(articleTitle);
+    postArticle(articleTitle, forceNewsletter);
   } else {
     console.log('generating title...');
     let generatedTitle = await generateArticleTitle();
-    postArticle(generatedTitle);
+    postArticle(generatedTitle, forceNewsletter);
   }
 }
 
@@ -1429,5 +1464,6 @@ const server = http.createServer((req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  performScheduledTask();
+  // On server start/restart, force newsletter regardless of day
+  performScheduledTask(true);
 });
