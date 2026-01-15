@@ -35,8 +35,9 @@ const MAILCHIMP_AUDIENCE_ID = process.env.MAILCHIMP_AUDIENCE_ID;
 const NEWSLETTER_ENABLED = process.env.NEWSLETTER_ENABLED === 'true';
 const NEWSLETTER_SEND_MODE = process.env.NEWSLETTER_SEND_MODE || 'draft'; // 'draft', 'test', or 'live'
 const NEWSLETTER_TEST_EMAILS = process.env.NEWSLETTER_TEST_EMAILS || ''; // comma-separated
-const NEWSLETTER_FROM_NAME = process.env.NEWSLETTER_FROM_NAME || 'RunV';
-const NEWSLETTER_REPLY_TO = process.env.NEWSLETTER_REPLY_TO || '';
+const NEWSLETTER_FROM_NAME = process.env.NEWSLETTER_FROM_NAME || 'Vorlich';
+const NEWSLETTER_FROM_EMAIL = process.env.NEWSLETTER_FROM_EMAIL || 'service@vorlich.com';
+const NEWSLETTER_REPLY_TO = process.env.NEWSLETTER_REPLY_TO || 'service@vorlich.com';
 
 // Newsletter only on Monday (1) and Friday (5)
 const NEWSLETTER_DAYS = [1, 5]; // 0=Sunday, 1=Monday, ..., 5=Friday, 6=Saturday
@@ -377,7 +378,7 @@ async function generateAndSendNewsletter(title, content, featuredImageUrl, artic
     return false;
   }
 
-  console.log(`Newsletter settings - Mode: ${NEWSLETTER_SEND_MODE}, From: ${NEWSLETTER_FROM_NAME}`);
+  console.log(`Newsletter settings - Mode: ${NEWSLETTER_SEND_MODE}, From: ${NEWSLETTER_FROM_NAME} <${NEWSLETTER_FROM_EMAIL}>`);
 
   // Generate newsletter content
   const newsletterHtml = await generateNewsletterHTML(title, content, featuredImageUrl, articleUrl);
@@ -406,7 +407,8 @@ async function generateAndSendNewsletter(title, content, featuredImageUrl, artic
       preview_text: previewText,
       title: 'Newsletter: ' + title.substring(0, 50),
       from_name: NEWSLETTER_FROM_NAME,
-      reply_to: NEWSLETTER_REPLY_TO || 'noreply@example.com',
+      from_email: NEWSLETTER_FROM_EMAIL,
+      reply_to: NEWSLETTER_REPLY_TO,
       auto_footer: true
     }
   };
